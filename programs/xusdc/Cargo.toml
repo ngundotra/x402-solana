@@ -14,9 +14,17 @@ cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
-idl-build = ["anchor-lang/idl-build"]
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 
 
 [dependencies]
 anchor-lang = "0.31.1"
+anchor-spl = "0.31.1"
+brine-ed25519 = "0.1.0"
+
+[dev-dependencies]
+litesvm = "0.6.1"
+litesvm-token = { version = "0.6.1", features = ["token-2022"] }
+solana-sdk = "2.2"
+serde_json = "1.0"
 

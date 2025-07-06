@@ -4,6 +4,9 @@ pub mod error;
 pub mod ixs;
 pub mod state;
 
+#[cfg(test)]
+mod tests;
+
 use ixs::*;
 
 declare_id!("AZzGDkysPRAZ9cfyRo1w4rHMS51NDDNT9XqHsC1WziLM");
@@ -13,8 +16,7 @@ pub mod xusdc {
     use super::*;
 
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
-        msg!("Greetings from: {:?}", ctx.program_id);
-        Ok(())
+        initialize::handler(ctx)
     }
 
     pub fn contribute_rent(ctx: Context<ContributeRent>, amount: u64) -> Result<()> {
@@ -28,11 +30,12 @@ pub mod xusdc {
     pub fn garbage_collect(ctx: Context<GarbageCollect>) -> Result<()> {
         garbage_collect::handler(ctx)
     }
-}
 
-#[derive(Accounts)]
-pub struct Initialize<'info> {
-    #[account(mut)]
-    pub authority: Signer<'info>,
-    pub system_program: Program<'info, System>,
+    pub fn settle_payment(ctx: Context<SettlePayment>, payload: SettlePayload) -> Result<()> {
+        settle_payment::settle_payment(ctx, payload)
+    }
+
+    pub fn deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {
+        deposit::handler(ctx, amount)
+    }
 }

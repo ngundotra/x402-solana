@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::error::ErrorCode;
-use crate::state::RENT_POOL_SEED;
+use crate::state::{Nonce, RENT_POOL_SEED};
 
 #[derive(Accounts)]
 pub struct GarbageCollect<'info> {
@@ -10,11 +10,6 @@ pub struct GarbageCollect<'info> {
     pub global_rent_pool: AccountInfo<'info>,
 
     pub system_program: Program<'info, System>,
-}
-
-#[account]
-pub struct Nonce {
-    pub expires_at: i64,
 }
 
 pub fn handler(ctx: Context<GarbageCollect>) -> Result<()> {

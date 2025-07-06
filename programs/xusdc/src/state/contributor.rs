@@ -6,4 +6,5 @@ pub const RENT_CONTRIBUTOR_SEED: &[u8] = b"rent-contributor";
 pub struct ContributorRentInfo {
     pub amount: u64,
     pub user: Pubkey,
+    pub nonces_funded: u64,
 }

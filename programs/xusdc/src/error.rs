@@ -10,4 +10,14 @@ pub enum ErrorCode {
     NonceIsNotWritable,
     #[msg("Nonce is not expired")]
     NonceIsNotExpired,
+    #[msg("Invalid payment authorization")]
+    InvalidPaymentAuthorization,
+    #[msg("Payment has expired")]
+    PaymentExpired,
+    #[msg("Invalid signature")]
+    InvalidSignature,
+    #[msg("Invalid public key")]
+    InvalidPublicKey,
+    #[msg("Unauthorized signer")]
+    UnauthorizedSigner,
 }
