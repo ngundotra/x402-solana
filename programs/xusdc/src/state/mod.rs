@@ -15,3 +15,4 @@ pub const ADMIN_KEY: Pubkey = pubkey!("CyJj5ejJAUveDXnLduJbkvwjxcmWJNqCuB9DR7AEx
 pub const XUSDC_MINT_KEY: Pubkey = pubkey!("xUSD1YCoHxQGvNRhaSGnACc8Rj7gTEB3LmCUxSPLSzM");
 pub const USDC_MINT_KEY: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
 pub const TRANSFER_AUTHORITY_SEED: &[u8] = b"transfer-authority";
+pub const NONCE_SEED: &[u8] = b"nonce";

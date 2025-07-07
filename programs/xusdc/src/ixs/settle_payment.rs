@@ -4,7 +4,7 @@ use brine_ed25519::sig_verify;
 use anchor_spl::token_2022::Token2022;
 use anchor_spl::token_interface::{transfer_checked, Mint, TokenAccount, TransferChecked};
 
-use crate::state::{NonceAccount, TRANSFER_AUTHORITY_SEED};
+use crate::state::{NonceAccount, NONCE_SEED, RENT_POOL_SEED, TRANSFER_AUTHORITY_SEED};
 
 #[derive(Accounts)]
 #[instruction(payload: SettlePayload)]
@@ -30,17 +30,16 @@ pub struct SettlePayment<'info> {
     #[account(seeds = [TRANSFER_AUTHORITY_SEED], bump)]
     pub transfer_authority: AccountInfo<'info>,
 
+    /// CHECK: PDA used as nonce account
     #[account(
-        init,
-        payer = rent_pool,
-        space = 8 + std::mem::size_of::<NonceAccount>(),
-        seeds = [b"nonce", payload.payment_auth.nonce.as_ref()],
+        mut,
+        seeds = [NONCE_SEED, payload.payment_auth.nonce.as_ref()],
         bump
     )]
-    pub nonce_account: Account<'info, NonceAccount>,
+    pub nonce_account: AccountInfo<'info>,
 
     /// CHECK: Global rent pool that funds nonce account creation
-    #[account(mut, seeds = [b"rent_pool"], bump)]
+    #[account(mut, seeds = [RENT_POOL_SEED], bump)]
     pub rent_pool: AccountInfo<'info>,
 
     pub system_program: Program<'info, System>,
@@ -65,6 +64,12 @@ pub struct SettlePayload {
 pub fn settle_payment(ctx: Context<SettlePayment>, payload: SettlePayload) -> Result<()> {
     let payment_auth = &payload.payment_auth;
 
+    require!(
+        ctx.accounts.nonce_account.data_is_empty(),
+        ErrorCode::NonceAlreadyUsed
+    );
+
+    // payer = rent_pool,
     // Verify the payment authorization matches the provided accounts
     require!(
         payment_auth.from == ctx.accounts.from_user_xusdc_ata.owner,
@@ -85,9 +90,12 @@ pub fn settle_payment(ctx: Context<SettlePayment>, payload: SettlePayload) -> Re
     // Serialize the payment authorization for signature verification
     let message = payment_auth.try_to_vec()?;
 
+    msg!("Verifying signature");
+
     // Verify the ed25519 signature
     sig_verify(&payload.signer_pubkey, &payload.signature, &message)
         .map_err(|_| error!(ErrorCode::InvalidSignature))?;
+    msg!("Verified signature");
 
     // Verify the signer is the from account
     let signer_pubkey = Pubkey::from(payload.signer_pubkey);
@@ -116,10 +124,38 @@ pub fn settle_payment(ctx: Context<SettlePayment>, payload: SettlePayload) -> Re
         ctx.accounts.xusdc_mint.decimals,
     )?;
 
-    // Update nonce account with expiry time
-    ctx.accounts.nonce_account.expires_at = payment_auth.valid_until;
-
     // The nonce account was created and funded by the global rent pool
+    let rent_bump = ctx.bumps.rent_pool;
+    let nonce_bump = ctx.bumps.nonce_account;
+    let space = 8 + std::mem::size_of::<NonceAccount>();
+    anchor_lang::system_program::create_account(
+        CpiContext::new_with_signer(
+            ctx.accounts.system_program.to_account_info(),
+            anchor_lang::system_program::CreateAccount {
+                from: ctx.accounts.rent_pool.to_account_info(),
+                to: ctx.accounts.nonce_account.to_account_info(),
+            },
+            &[
+                &[RENT_POOL_SEED, &[rent_bump]],
+                &[NONCE_SEED, &payload.payment_auth.nonce, &[nonce_bump]],
+            ],
+        ),
+        Rent::get()?.minimum_balance(space),
+        space as u64,
+        &crate::ID,
+    )?;
+
+    // Update nonce account with expiry time
+    let mut nonce_data = ctx.accounts.nonce_account.try_borrow_mut_data()?;
+    let mut nonce_account = NonceAccount::DISCRIMINATOR.to_vec();
+    nonce_account.extend_from_slice(
+        &NonceAccount {
+            expires_at: payment_auth.valid_until,
+        }
+        .try_to_vec()?,
+    );
+
+    nonce_data[0..nonce_account.len()].copy_from_slice(&nonce_account);
 
     Ok(())
 }

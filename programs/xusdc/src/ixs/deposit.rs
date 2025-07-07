@@ -1,9 +1,8 @@
-use anchor_lang::accounts::interface::Interface;
 use anchor_lang::accounts::interface_account::InterfaceAccount;
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token};
 use anchor_spl::token_2022::{self, Token2022};
-use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
+use anchor_spl::token_interface::{Mint, TokenAccount};
 
 use crate::state::{TRANSFER_AUTHORITY_SEED, USDC_MINT_KEY, XUSDC_MINT_KEY};
 
