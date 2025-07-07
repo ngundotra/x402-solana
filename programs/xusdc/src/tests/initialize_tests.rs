@@ -7,30 +7,23 @@ mod tests {
     };
     use crate::{self as xusdc};
     use anchor_lang::prelude::*;
-    use anchor_lang::solana_program::{
-        instruction::Instruction, program_pack::Pack, system_instruction,
-    };
+    use anchor_lang::solana_program::{instruction::Instruction, program_pack::Pack};
     use anchor_lang::system_program;
     use anchor_lang::InstructionData;
     use anchor_spl::associated_token::spl_associated_token_account::instruction::create_associated_token_account_idempotent;
     use anchor_spl::associated_token::{self, get_associated_token_address_with_program_id};
-    // use anchor_spl::token::spl_token::state::Mint;
-    use anchor_spl::token::{self, Token, TokenAccount};
-    use anchor_spl::token_2022::{self, spl_token_2022};
+    use anchor_spl::token::Token;
+    use anchor_spl::token_2022::spl_token_2022;
     use litesvm::LiteSVM;
     use litesvm_token::get_spl_account;
     use litesvm_token::spl_token::extension::permanent_delegate::get_permanent_delegate;
-    use litesvm_token::spl_token::{extension::StateWithExtensions, state::Mint};
-    // use litesvm_token::spl_token::extension::BaseStateWithExtensions;
     use litesvm_token::spl_token::instruction::mint_to;
-    // use litesvm_token::spl_token::
-    use serde_json::json;
-    // use serde::Deserialize;
+    use litesvm_token::spl_token::{extension::StateWithExtensions, state::Mint};
     use solana_sdk::account::Account;
+    use solana_sdk::instruction::InstructionError;
     use solana_sdk::program_option::COption;
-    use solana_sdk::program_pack::Pack as SolanaPack;
     use solana_sdk::signature::{read_keypair_file, Keypair, Signer};
-    use solana_sdk::transaction::Transaction;
+    use solana_sdk::transaction::{Transaction, TransactionError};
     use std::env;
     use std::path::PathBuf;
     use std::str::FromStr;
@@ -116,8 +109,6 @@ mod tests {
 
     fn initialize(svm: &mut LiteSVM, admin: &Keypair) {
         let program_id = xusdc::ID;
-        // Create admin keypair and airdrop SOL
-
         // Load mint keypair
         let mint_keypair = load_mint_keypair();
         assert_eq!(mint_keypair.pubkey(), XUSDC_MINT_KEY);
@@ -164,7 +155,7 @@ mod tests {
 
         // For debugging - print result
         match init_result {
-            Ok(_) => println!("Initialize succeeded"),
+            Ok(_) => {}
             Err(e) => println!("Initialize failed: {}", e.meta.logs.join("\n")),
         }
 
@@ -311,10 +302,17 @@ mod tests {
     fn test_transfer_with_permanent_delegate() {
         let (mut svm, admin) = setup();
         let user = deposit_and_initialize(&mut svm, &admin, TEN_USDC);
-        transfer_with_permanent_delegate(&mut svm, &user);
+        transfer_with_permanent_delegate(&mut svm, &user, 10_000);
     }
 
-    fn transfer_with_permanent_delegate(svm: &mut LiteSVM, alice: &Keypair) {
+    fn transfer_with_permanent_delegate(
+        svm: &mut LiteSVM,
+        alice: &Keypair,
+        expiry_delta: i64,
+    ) -> PaymentAuthorization {
+        let clock = svm.get_sysvar::<Clock>();
+        let expires_at = clock.unix_timestamp + expiry_delta;
+
         let program_id = xusdc::ID;
         let (transfer_authority, _) =
             Pubkey::find_program_address(&[TRANSFER_AUTHORITY_SEED], &program_id);
@@ -364,7 +362,7 @@ mod tests {
             to: bob.pubkey(),
             amount: TEN_USDC,
             nonce: [1u8; 32],
-            valid_until: 9999999999,
+            valid_until: expires_at,
         };
         let (nonce_pda, _) =
             Pubkey::find_program_address(&[NONCE_SEED, &payment_auth.nonce], &program_id);
@@ -427,17 +425,19 @@ mod tests {
         let nonce_account_data = nonce_account.unwrap().data;
         let nonce_account_ext =
             NonceAccount::try_deserialize(&mut nonce_account_data.as_slice()).unwrap();
-        assert_eq!(nonce_account_ext.expires_at, 9999999999);
+        assert_eq!(nonce_account_ext.expires_at, expires_at);
+
+        payment_auth
     }
 
     #[test]
     fn test_withdraw_flow() {
         let (mut svm, admin) = setup();
         let user = deposit_and_initialize(&mut svm, &admin, TEN_USDC);
-        withdraw(&mut svm, &admin, &user, TEN_USDC);
+        withdraw(&mut svm, &user, TEN_USDC);
     }
 
-    fn withdraw(svm: &mut LiteSVM, admin: &Keypair, user: &Keypair, amount: u64) {
+    fn withdraw(svm: &mut LiteSVM, user: &Keypair, amount: u64) {
         let program_id = xusdc::ID;
 
         let (transfer_authority, _) =
@@ -496,5 +496,94 @@ mod tests {
             get_spl_account::<litesvm_token::spl_token::state::Account>(&svm, &user_usdc_ata)
                 .unwrap();
         assert_eq!(user_usdc_ata_account.amount, amount);
+    }
+
+    #[test]
+    fn test_garbage_collection() {
+        let (mut svm, admin) = setup();
+        let user = deposit_and_initialize(&mut svm, &admin, TEN_USDC);
+
+        let expiry_delta = 10_000;
+        let payment_auth = transfer_with_permanent_delegate(&mut svm, &user, expiry_delta);
+
+        let (nonce_pda, _) =
+            Pubkey::find_program_address(&[NONCE_SEED, &payment_auth.nonce], &xusdc::ID);
+        let nonce = svm.get_account(&nonce_pda).unwrap();
+        let nonce_lamports = nonce.lamports;
+        let nonce = NonceAccount::try_deserialize(&mut nonce.data.as_slice()).unwrap();
+        assert_eq!(nonce.expires_at, payment_auth.valid_until);
+
+        let clock = svm.get_sysvar::<Clock>();
+        assert!(clock.unix_timestamp < payment_auth.valid_until);
+
+        let (global_rent_pool, _) = Pubkey::find_program_address(&[RENT_POOL_SEED], &xusdc::ID);
+        let global_rent_pool_account = svm.get_account(&global_rent_pool).unwrap();
+        let global_lamports = global_rent_pool_account.lamports;
+
+        let ix = Instruction {
+            program_id: xusdc::ID,
+            accounts: vec![
+                AccountMeta::new(nonce_pda, false),
+                AccountMeta::new(global_rent_pool, false),
+            ],
+            data: crate::instruction::GarbageCollect {}.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix.clone()],
+            Some(&admin.pubkey()),
+            &[&admin],
+            svm.latest_blockhash(),
+        );
+        match svm.send_transaction(tx) {
+            Ok(_) => {
+                panic!("Garbage collection should fail, since the nonce is not yet expired");
+            }
+            Err(e) => {
+                if let TransactionError::InstructionError(_, e) = e.err {
+                    if let InstructionError::Custom(e) = e {
+                        assert_eq!(
+                            u32::from(e),
+                            u32::from(crate::error::ErrorCode::NonceIsNotExpired)
+                        );
+                    } else {
+                        panic!("Expected Custom(NonceIsNotExpired), got {:?}", e);
+                    }
+                } else {
+                    panic!("Expected InstructionError, got {:?}", e.err);
+                }
+            }
+        }
+
+        svm.expire_blockhash();
+        let mut clock = svm.get_sysvar::<Clock>();
+        clock.unix_timestamp = clock.unix_timestamp + expiry_delta + 1;
+        svm.set_sysvar(&clock);
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&admin.pubkey()),
+            &[&admin],
+            svm.latest_blockhash(),
+        );
+        match svm.send_transaction(tx) {
+            Ok(_) => {}
+            Err(e) => {
+                panic!("Error: {}", e.meta.logs.join("\n"));
+            }
+        }
+
+        svm.expire_blockhash();
+        let global_rent_pool_account = svm.get_account(&global_rent_pool).unwrap();
+        assert_eq!(
+            global_rent_pool_account.lamports,
+            global_lamports + nonce_lamports
+        );
+
+        // NOTE: svm doesn't actually delete the nonce account data when lamports are zeroed
+        // but we expect it to be deleted on mainnet/devnet
+        let nonce_account = svm.get_account(&nonce_pda).unwrap();
+        assert_eq!(nonce_account.lamports, 0);
+        assert_eq!(nonce_account.data.len(), 0);
     }
 }

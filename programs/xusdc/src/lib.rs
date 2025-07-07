@@ -27,7 +27,9 @@ pub mod xusdc {
         withdraw_rent::handler(ctx, amount)
     }
 
-    pub fn garbage_collect(ctx: Context<GarbageCollect>) -> Result<()> {
+    pub fn garbage_collect<'info>(
+        ctx: Context<'_, '_, '_, 'info, GarbageCollect<'info>>,
+    ) -> Result<()> {
         garbage_collect::handler(ctx)
     }
 
