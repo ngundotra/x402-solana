@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::ixs::settle_payment::{PaymentAuthorization, SettlePayload};
-    use crate::state::{ADMIN_KEY, TRANSFER_AUTHORITY_SEED, XUSDC_MINT_KEY};
+    use crate::state::{ADMIN_KEY, TRANSFER_AUTHORITY_SEED, USDC_MINT_KEY, XUSDC_MINT_KEY};
     use crate::{self as xusdc};
     use anchor_lang::prelude::*;
     use anchor_lang::solana_program::{
@@ -10,8 +10,11 @@ mod tests {
     use anchor_lang::system_program;
     use anchor_lang::InstructionData;
     use anchor_spl::associated_token;
+    use anchor_spl::associated_token::spl_associated_token_account::instruction::create_associated_token_account_idempotent;
+    use anchor_spl::token::Token;
     use anchor_spl::token_2022::spl_token_2022;
     use litesvm::LiteSVM;
+    use serde_json::json;
     // use serde::Deserialize;
     use solana_sdk::account::Account;
     use solana_sdk::program_pack::Pack as SolanaPack;
@@ -19,6 +22,7 @@ mod tests {
     use solana_sdk::transaction::Transaction;
     use std::env;
     use std::path::PathBuf;
+    use std::str::FromStr;
 
     /// Read the default Solana keypair file into memory.
     pub fn load_default_keypair() -> Keypair {
@@ -36,21 +40,29 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             XUSDC_MINT_KEY.to_string()
         ));
-        // panic!("p: {:?}", p);
         read_keypair_file(p).unwrap()
     }
 
-    // pub fn load_keypair_from_file(path: PathBuf) -> Keypair {
-    //     let kp_bytes_str = std::fs::read_to_string(&path).unwrap();
-    //     // panic!("kp_bytes_str: {:?}", kp_bytes_str);
-    //     let keypair_bytes: &[u8] = serde_json::from_str(&kp_bytes_str).unwrap();
-    //     let keypair: Keypair = Keypair::from_bytes(&keypair_bytes).unwrap();
-    //     keypair
-    // }
+    pub fn load_account_from_file(path: PathBuf) -> Account {
+        let data_raw = std::fs::read_to_string(path).unwrap();
+        let data: serde_json::Value = serde_json::from_str(&data_raw).unwrap();
+        let data = data["account"].as_object().unwrap();
+        println!("data: {:?}", data);
+        Account {
+            lamports: data["lamports"].as_u64().unwrap_or(0),
+            data: base64::decode(data["data"][0].as_str().unwrap()).unwrap(),
+            owner: Pubkey::from_str(data["owner"].as_str().unwrap()).unwrap(),
+            executable: false,
+            rent_epoch: data["rentEpoch"].as_u64().unwrap(),
+        }
+    }
 
-    #[test]
-    fn test_initialize_with_litesvm() {
-        let svm = &mut LiteSVM::new();
+    pub fn setup() -> (LiteSVM, Keypair) {
+        let mut svm = LiteSVM::new();
+
+        let admin = load_default_keypair();
+        assert_eq!(admin.pubkey(), ADMIN_KEY);
+        svm.airdrop(&admin.pubkey(), 10_000_000).unwrap();
 
         // Deploy the xUSDC program
         let program_id = xusdc::ID;
@@ -58,14 +70,20 @@ mod tests {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/xusdc.so");
         let program_bytes = std::fs::read(so_path).unwrap();
         svm.add_program(program_id, &program_bytes);
+        svm.set_account(
+            USDC_MINT_KEY,
+            load_account_from_file(PathBuf::from("../../usdc-mint.json")),
+        )
+        .unwrap();
+        (svm, admin)
+    }
 
-        // Deploy Token-2022 program
-        // svm.add_program(spl_token_2022::ID, &[0u8; 1000]);
+    #[test]
+    fn test_initialize_with_litesvm() {
+        let (mut svm, admin) = setup();
 
+        let program_id = xusdc::ID;
         // Create admin keypair and airdrop SOL
-        let admin = load_default_keypair();
-        assert_eq!(admin.pubkey(), ADMIN_KEY);
-        svm.airdrop(&admin.pubkey(), 10_000_000).unwrap();
 
         // Load mint keypair
         let mint_keypair = load_mint_keypair();
@@ -78,8 +96,8 @@ mod tests {
         // Create global ATA
         let global_ata = anchor_spl::associated_token::spl_associated_token_account::get_associated_token_address_with_program_id(
             &transfer_authority,
-            &XUSDC_MINT_KEY,
-            &spl_token_2022::ID,
+            &USDC_MINT_KEY,
+            &Token::id(),
         );
 
         // Create initialize instruction
@@ -88,9 +106,11 @@ mod tests {
             AccountMeta::new_readonly(system_program::ID, false),
             AccountMeta::new_readonly(spl_token_2022::ID, false),
             AccountMeta::new(XUSDC_MINT_KEY, true),
+            AccountMeta::new(USDC_MINT_KEY, false),
             AccountMeta::new(global_ata, false),
             AccountMeta::new_readonly(transfer_authority, false),
             AccountMeta::new_readonly(associated_token::ID, false),
+            AccountMeta::new_readonly(Token::id(), false),
         ];
         let data = crate::instruction::Initialize {}.data();
 
@@ -111,7 +131,7 @@ mod tests {
 
         // For debugging - print result
         match init_result {
-            Ok(meta) => println!("Initialize succeeded"),
+            Ok(_) => println!("Initialize succeeded"),
             Err(e) => println!("Initialize failed: {}", e.meta.logs.join("\n")),
         }
 
@@ -155,6 +175,8 @@ mod tests {
         // User deposits USDC and receives xUSDC 1:1
 
         let amount = 100_000_000u64; // 100 USDC (6 decimals)
+
+        create_associated_token_account_idempotent(admin, wallet_address, token_mint_address, token_program_id)
 
         // In the actual deposit:
         // 1. User has USDC in their token account

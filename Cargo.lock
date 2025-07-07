@@ -5789,6 +5789,7 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
+ "base64 0.21.7",
  "brine-ed25519",
  "litesvm",
  "litesvm-token",
