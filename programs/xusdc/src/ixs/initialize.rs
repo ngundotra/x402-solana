@@ -69,7 +69,7 @@ pub fn handler(ctx: Context<Initialize>) -> Result<()> {
             mint: ctx.accounts.xusdc_mint.to_account_info(),
         },
     );
-    token_2022::initialize_mint2(cpi_context, 6, &ctx.accounts.authority.key(), None)?;
+    token_2022::initialize_mint2(cpi_context, 6, &ctx.accounts.transfer_authority.key(), None)?;
 
     let expected_ata = anchor_spl::associated_token::get_associated_token_address_with_program_id(
         &ctx.accounts.transfer_authority.key(),

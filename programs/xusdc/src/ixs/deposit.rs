@@ -14,13 +14,14 @@ pub struct Deposit<'info> {
     pub tokenkeg: Program<'info, Token>,
     pub token_program: Program<'info, Token2022>,
     #[account(
+        mut,
         mint::token_program = token_program.key(),
         address = XUSDC_MINT_KEY
     )]
     pub xusdc_mint: InterfaceAccount<'info, Mint>,
 
     #[account(
-        mint::token_program = token_program.key(),
+        mint::token_program = tokenkeg.key(),
         address = USDC_MINT_KEY
     )]
     pub usdc_mint: InterfaceAccount<'info, Mint>,
@@ -31,7 +32,7 @@ pub struct Deposit<'info> {
     #[account(mut, token::mint=xusdc_mint, token::authority=user, token::token_program=token_program.key())]
     pub user_xusdc_ata: InterfaceAccount<'info, TokenAccount>,
 
-    #[account(mut, token::mint=xusdc_mint, token::token_program=token_program.key())]
+    #[account(mut, token::mint=usdc_mint, token::token_program=tokenkeg.key())]
     pub usdc_global_ata: InterfaceAccount<'info, TokenAccount>,
 
     /// CHECK: PDA used as transfer authority
@@ -43,7 +44,7 @@ pub fn handler(ctx: Context<Deposit>, amount: u64) -> Result<()> {
     let bump = ctx.bumps.transfer_authority;
     token::transfer_checked(
         CpiContext::new(
-            ctx.accounts.token_program.to_account_info(),
+            ctx.accounts.tokenkeg.to_account_info(),
             token::TransferChecked {
                 from: ctx.accounts.user_usdc_ata.to_account_info(),
                 to: ctx.accounts.usdc_global_ata.to_account_info(),

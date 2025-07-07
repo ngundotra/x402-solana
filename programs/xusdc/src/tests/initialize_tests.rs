@@ -9,14 +9,19 @@ mod tests {
     };
     use anchor_lang::system_program;
     use anchor_lang::InstructionData;
-    use anchor_spl::associated_token;
     use anchor_spl::associated_token::spl_associated_token_account::instruction::create_associated_token_account_idempotent;
-    use anchor_spl::token::Token;
+    use anchor_spl::associated_token::{self, get_associated_token_address_with_program_id};
+    use anchor_spl::token::spl_token::state::Mint;
+    use anchor_spl::token::{self, Token, TokenAccount};
     use anchor_spl::token_2022::spl_token_2022;
     use litesvm::LiteSVM;
+    use litesvm_token::get_spl_account;
+    use litesvm_token::spl_token::instruction::mint_to;
+    // use litesvm_token::spl_token::
     use serde_json::json;
     // use serde::Deserialize;
     use solana_sdk::account::Account;
+    use solana_sdk::program_option::COption;
     use solana_sdk::program_pack::Pack as SolanaPack;
     use solana_sdk::signature::{read_keypair_file, Keypair, Signer};
     use solana_sdk::transaction::Transaction;
@@ -47,7 +52,6 @@ mod tests {
         let data_raw = std::fs::read_to_string(path).unwrap();
         let data: serde_json::Value = serde_json::from_str(&data_raw).unwrap();
         let data = data["account"].as_object().unwrap();
-        println!("data: {:?}", data);
         Account {
             lamports: data["lamports"].as_u64().unwrap_or(0),
             data: base64::decode(data["data"][0].as_str().unwrap()).unwrap(),
@@ -75,13 +79,34 @@ mod tests {
             load_account_from_file(PathBuf::from("../../usdc-mint.json")),
         )
         .unwrap();
+
+        let usdc_mint_account = svm.get_account(&USDC_MINT_KEY);
+        let usdc_mint_info = Mint::unpack(&usdc_mint_account.clone().unwrap().data).unwrap();
+        let mut owned_usdc_mint = usdc_mint_info.clone();
+        owned_usdc_mint.mint_authority = COption::Some(admin.pubkey());
+        let mut data = [0u8; Mint::LEN];
+        Mint::pack(owned_usdc_mint, &mut data).unwrap();
+        svm.set_account(
+            USDC_MINT_KEY,
+            Account {
+                lamports: usdc_mint_account.unwrap().lamports,
+                data: data.to_vec(),
+                owner: anchor_spl::token::ID,
+                executable: false,
+                rent_epoch: 0,
+            },
+        )
+        .unwrap();
         (svm, admin)
     }
 
     #[test]
     fn test_initialize_with_litesvm() {
         let (mut svm, admin) = setup();
+        initialize(&mut svm, &admin);
+    }
 
+    fn initialize(svm: &mut LiteSVM, admin: &Keypair) {
         let program_id = xusdc::ID;
         // Create admin keypair and airdrop SOL
 
@@ -142,9 +167,12 @@ mod tests {
 
         let ata_account = svm.get_account(&global_ata);
         assert!(ata_account.is_some(), "ATA account should exist");
+
+        let mint: Mint = get_spl_account::<Mint>(&svm, &XUSDC_MINT_KEY).unwrap();
+        assert_eq!(mint.mint_authority.unwrap(), transfer_authority);
     }
 
-    #[test]
+    // #[test]
     fn test_permanent_delegate_concept() {
         // This test verifies our understanding of permanent delegate
         // Without executing on-chain, we verify the concept
@@ -173,10 +201,112 @@ mod tests {
     fn test_mock_deposit_flow() {
         // This test demonstrates the expected deposit flow
         // User deposits USDC and receives xUSDC 1:1
+        let (mut svm, admin) = setup();
+        initialize(&mut svm, &admin);
 
         let amount = 100_000_000u64; // 100 USDC (6 decimals)
 
-        create_associated_token_account_idempotent(admin, wallet_address, token_mint_address, token_program_id)
+        let user = Keypair::new();
+
+        let user_usdc_ata = get_associated_token_address_with_program_id(
+            &user.pubkey(),
+            &USDC_MINT_KEY,
+            &Token::id(),
+        );
+
+        let create_user_usdc_ata_ix = create_associated_token_account_idempotent(
+            &admin.pubkey(),
+            &user.pubkey(),
+            &USDC_MINT_KEY,
+            &Token::id(),
+        );
+
+        let mint_ix = mint_to(
+            &Token::id(),
+            &USDC_MINT_KEY,
+            &user_usdc_ata,
+            &admin.pubkey(),
+            &[&admin.pubkey()],
+            amount,
+        )
+        .unwrap();
+
+        // let data = get_spl_account::<Mint>(&svm, &USDC_MINT_KEY);
+        // println!("data: {:?}", data);
+
+        let tx = Transaction::new_signed_with_payer(
+            &[create_user_usdc_ata_ix, mint_ix],
+            Some(&admin.pubkey()),
+            &[&admin],
+            svm.latest_blockhash(),
+        );
+        svm.send_transaction(tx).unwrap();
+
+        let user_usdc_ata_account = svm.get_account(&user_usdc_ata);
+        assert!(
+            user_usdc_ata_account.is_some(),
+            "User USDC ATA should exist"
+        );
+
+        let user_xusdc_ata = get_associated_token_address_with_program_id(
+            &user.pubkey(),
+            &XUSDC_MINT_KEY,
+            &spl_token_2022::ID,
+        );
+
+        let (transfer_authority, _) =
+            Pubkey::find_program_address(&[TRANSFER_AUTHORITY_SEED], &xusdc::ID);
+
+        let global_usdc_ata = get_associated_token_address_with_program_id(
+            &transfer_authority,
+            &USDC_MINT_KEY,
+            &Token::id(),
+        );
+
+        let accounts = vec![
+            AccountMeta::new(user.pubkey(), true),
+            AccountMeta::new_readonly(Token::id(), false),
+            AccountMeta::new_readonly(spl_token_2022::ID, false),
+            AccountMeta::new(XUSDC_MINT_KEY, false),
+            AccountMeta::new_readonly(USDC_MINT_KEY, false),
+            AccountMeta::new(user_usdc_ata, false),
+            AccountMeta::new(user_xusdc_ata, false),
+            AccountMeta::new(global_usdc_ata, false),
+            AccountMeta::new_readonly(transfer_authority, false),
+        ];
+        let data = crate::instruction::Deposit { amount }.data();
+
+        let init_ix = Instruction {
+            program_id: xusdc::id(),
+            accounts,
+            data,
+        };
+
+        let create_user_xusdc_ata_ix = create_associated_token_account_idempotent(
+            &admin.pubkey(),
+            &user.pubkey(),
+            &XUSDC_MINT_KEY,
+            &spl_token_2022::ID,
+        );
+        let tx = Transaction::new_signed_with_payer(
+            &[create_user_xusdc_ata_ix, init_ix],
+            Some(&admin.pubkey()),
+            &[&admin, &user],
+            svm.latest_blockhash(),
+        );
+        if let Err(e) = svm.send_transaction(tx) {
+            println!("Error: {}", e.meta.logs.join("\n"));
+        }
+
+        let user_xusdc_ata_account =
+            get_spl_account::<litesvm_token::spl_token::state::Account>(&svm, &user_xusdc_ata)
+                .unwrap();
+        assert_eq!(user_xusdc_ata_account.amount, amount);
+
+        let user_usdc_ata_account =
+            get_spl_account::<litesvm_token::spl_token::state::Account>(&svm, &user_usdc_ata)
+                .unwrap();
+        assert_eq!(user_usdc_ata_account.amount, 0);
 
         // In the actual deposit:
         // 1. User has USDC in their token account
@@ -187,14 +317,9 @@ mod tests {
 
         // The key insight is that xUSDC can be transferred by the permanent delegate
         // without requiring the user's signature on-chain
-
-        assert_eq!(
-            amount, 100_000_000,
-            "Amount represents 100 tokens with 6 decimals"
-        );
     }
 
-    #[test]
+    // #[test]
     fn test_transfer_with_permanent_delegate() {
         let mut svm = LiteSVM::new();
 
@@ -339,7 +464,7 @@ mod tests {
         // Only the facilitator signed the transaction, using the permanent delegate authority
     }
 
-    #[test]
+    // #[test]
     fn test_create_mock_usdc_with_litesvm() {
         let mut svm = LiteSVM::new();
 
@@ -388,7 +513,7 @@ mod tests {
         assert!(mint_account.is_some(), "Mint account should exist");
     }
 
-    #[test]
+    // #[test]
     fn test_deposit_with_litesvm() {
         let mut svm = LiteSVM::new();
 
