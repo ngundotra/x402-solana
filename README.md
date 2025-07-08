@@ -1,145 +1,132 @@
-# xUSDC - Gasless Micropayments on Solana
+# xUSDC - Pay for Anything on the Internet with USDC
 
-xUSDC is a Token-2022 program that enables gasless micropayments for the x402 protocol on Solana. It implements the EIP-3009 standard (Transfer With Authorization) adapted for Solana, allowing users to deposit USDC once to receive xUSDC tokens, then make payments by signing off-chain messages without paying transaction fees.
+xUSDC brings the simplicity of EIP-3009 (gasless USDC transfers) to Solana. Just buy xUSDC once, and pay for anything online without worrying about gas fees, blockchain complexity, or transaction signing.
 
-## Key Features
+## For Users: It's This Simple
 
-- **EIP-3009 Compatible**: Implements the Transfer With Authorization standard on Solana
-- **1:1 USDC Backing**: Every xUSDC is backed by real USDC in the program vault
-- **Gasless Payments**: Make payments by signing messages off-chain - no SOL needed
-- **Permanent Delegate**: Program has transfer authority for seamless payment processing
-- **Replay Protection**: Rolling window nonce system prevents double-spending
-- **Rent Recycling**: Automated garbage collection keeps storage costs sustainable
+1. **Buy xUSDC** - Swap your USDC for xUSDC (1:1 exchange)
+2. **Transfer to a burner wallet** - Keep your browsing private
+3. **Pay for anything** - Just click "pay with xUSDC" on any website
 
-## How It Works
+That's it. No gas fees. No popups. No blockchain knowledge required.
 
-1. **Deposit**: Users deposit USDC and receive xUSDC tokens 1:1
-2. **Pay**: Sign payment authorizations off-chain (no gas fees)
-3. **Settle**: Facilitator service submits transactions using permanent delegate
-4. **Withdraw**: Burn xUSDC to get USDC back anytime
+## Why xUSDC?
 
-## Program Instructions
+- **Zero Gas Fees**: Pay $0.10 for something that costs $0.10
+- **Instant Payments**: No waiting for confirmations
+- **Works Everywhere**: Any website can accept xUSDC payments
+- **Complete Privacy**: Use burner wallets for anonymous browsing
+- **EIP-3009 Standard**: The same trusted gasless payment system used on Ethereum
 
-### Core Operations
-- `initialize()` - One-time setup of the xUSDC mint and program state
-- `deposit(amount)` - Convert USDC to xUSDC
-- `withdraw(amount)` - Convert xUSDC back to USDC
-- `settle_payment(payload: SettlePayload)` - Process off-chain payment authorization (EIP-3009 compatible)
-- `emergency_pause()` - Admin function to halt operations
+## How It Works (For the Curious)
 
-### Rent Management
-- `contribute_rent(amount)` - Add SOL to cover nonce storage costs
-- `withdraw_rent(amount)` - Reclaim unused rent contributions
-- `garbage_collect(nonces)` - Clean up expired nonces for rewards
+When you pay with xUSDC, you're just signing a message - like signing a check. The website handles all the blockchain stuff for you. Your xUSDC stays in your wallet until the exact moment of payment.
 
-## Architecture
+## Getting Started
 
-```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│    User     │────▶│  Facilitator │────▶│   xUSDC     │
-│   Wallet    │     │   Service    │     │   Program   │
-└─────────────┘     └──────────────┘     └─────────────┘
-       │                                         │
-       │                                         ▼
-       │                                  ┌─────────────┐
-       └─────────── Deposits/Withdrawals─▶│ USDC Vault  │
-                                          └─────────────┘
-```
+### Where to Get xUSDC
+- **DEXs**: Swap USDC → xUSDC on Jupiter, Raydium, or Orca
+- **Direct Deposit**: Use any xUSDC-enabled app to convert USDC
+- **Liquidity Pools**: Facilitators maintain USDC/xUSDC pools for instant swaps
 
-## Payment Flow (EIP-3009 Compatible)
+### Using xUSDC
+1. Install any Solana wallet (Phantom, Solflare, etc.)
+2. Buy/swap for xUSDC
+3. Send some to a fresh wallet for private browsing
+4. Click "Pay with xUSDC" on any supported website
 
-1. User signs payment authorization off-chain:
-   ```rust
-   PaymentAuthorization {
-     from: user_wallet,      // Signer's pubkey
-     to: recipient_wallet,   // Recipient's pubkey
-     amount: 1000000,        // 1 USDC in base units
-     nonce: [u8; 32],        // Random 32 bytes
-     valid_until: i64,       // Unix timestamp
-   }
-   ```
+---
 
-2. Recipient sends authorization with Ed25519 signature to facilitator
+## For Facilitators & Developers
 
-3. Facilitator submits `settle_payment` with:
-   ```rust
-   SettlePayload {
-     payment_auth: PaymentAuthorization,
-     signature: [u8; 64],      // Ed25519 signature
-     signer_pubkey: [u8; 32],  // Must match 'from' field
-   }
-   ```
+Facilitators handle the infrastructure so users don't have to think about blockchain mechanics. They manage liquidity pools, process payments, and handle all the technical complexity.
 
-4. Program verifies signature and transfers xUSDC using permanent delegate authority
+### EIP-3009 Implementation
 
-## Security Features
+xUSDC implements the Transfer With Authorization standard, enabling gasless transfers through signed messages:
 
-- **Ed25519 Signature Verification**: All payments require valid signatures
-- **Nonce Uniqueness**: Each payment can only be processed once
-- **Time-Bounded Validity**: Payments expire after 24 hours maximum
-- **Emergency Pause**: Admin can halt all operations if needed
-
-## Development
-
-### Prerequisites
-- Rust 1.75+
-- Solana CLI 1.18+
-- Anchor Framework 0.30+
-
-### Building
-```bash
-# Build the program
-anchor build
-
-# Run tests
-anchor test
-```
-
-### Testing
-The test suite covers:
-- Initialization and token setup
-- Deposit/withdraw flows
-- Payment settlement with signature verification
-- Nonce management and garbage collection
-- Edge cases and security scenarios
-
-## Deployment
-
-### Mainnet Addresses
-- Program: `[TBD]`
-- xUSDC Mint: `[TBD]`
-- USDC Vault: `[TBD]`
-
-### Devnet Testing
-1. Deploy program: `anchor deploy --provider.cluster devnet`
-2. Initialize: `anchor run initialize --provider.cluster devnet`
-3. Follow test scripts in `tests/` directory
-
-## Integration
-
-### For dApp Developers
 ```javascript
-// Deposit USDC to get xUSDC
-await program.methods
-  .deposit(new BN(1_000_000))
-  .accounts({...})
-  .rpc();
-
-// Sign payment off-chain
-const payment = {
-  from: wallet.publicKey,
-  to: recipientPubkey,
-  amount: new BN(1_000_000),
+// User signs a payment authorization (happens automatically in wallets)
+const authorization = {
+  from: userWallet,
+  to: merchantWallet,
+  amount: 1000000, // $1.00 USDC
   nonce: randomBytes(32),
   validUntil: Date.now() + 3600
 };
-
-const signature = await wallet.signMessage(payment);
-// Send to facilitator API
 ```
 
-### For Facilitator Services
-See `facilitator/README.md` for API documentation and integration guide.
+### Technical Architecture
+
+```
+User Experience:
+┌─────────────┐
+│    User     │ ← Just signs messages, no gas fees
+│   Wallet    │
+└─────────────┘
+
+Behind the Scenes (handled by facilitators):
+┌──────────────┐     ┌─────────────┐
+│  Facilitator │────▶│   xUSDC     │
+│   Service    │     │   Program   │
+└──────────────┘     └─────────────┘
+                            │
+                            ▼
+                     ┌─────────────┐
+                     │ USDC Vault  │
+                     └─────────────┘
+```
+
+### Core Program Instructions
+
+- `deposit(amount)` - Convert USDC to xUSDC (1:1)
+- `withdraw(amount)` - Convert xUSDC back to USDC
+- `settle_payment(payload)` - Process EIP-3009 signed authorizations
+
+### Rent & Infrastructure Management
+
+Facilitators handle storage costs through a rent pool system:
+- `contribute_rent()` - Add SOL to cover transaction costs
+- `garbage_collect()` - Clean up old data for rewards
+
+### Security
+
+- **Signature Verification**: Ed25519 signatures prevent forgery
+- **Replay Protection**: Each payment can only be processed once
+- **Time Limits**: Payments expire after 24 hours
+- **1:1 Backing**: Every xUSDC is backed by real USDC
+
+### Integration Guide
+
+For websites accepting xUSDC:
+```javascript
+// Request payment from user
+const payment = await wallet.requestPayment({
+  recipient: "your-wallet-address",
+  amount: "1.00",
+  currency: "xUSDC"
+});
+
+// Submit to facilitator API
+await facilitatorAPI.processPayment(payment);
+```
+
+For facilitator services, see the detailed [Facilitator Documentation](facilitator/README.md).
+
+### Building & Development
+
+```bash
+# Prerequisites
+- Rust 1.75+
+- Solana CLI 1.18+
+- Anchor 0.30+
+
+# Build
+anchor build
+
+# Test
+anchor test
+```
 
 ## License
 
