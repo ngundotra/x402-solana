@@ -96,36 +96,15 @@ Facilitators handle storage costs through a rent pool system:
 - **Time Limits**: Payments expire after 24 hours
 - **1:1 Backing**: Every xUSDC is backed by real USDC
 
-### Integration Guide
-
-For websites accepting xUSDC:
-```javascript
-// Request payment from user
-const payment = await wallet.requestPayment({
-  recipient: "your-wallet-address",
-  amount: "1.00",
-  currency: "xUSDC"
-});
-
-// Submit to facilitator API
-await facilitatorAPI.processPayment(payment);
-```
-
-For facilitator services, see the detailed [Facilitator Documentation](facilitator/README.md).
 
 ### Building & Development
 
 ```bash
-# Prerequisites
-- Rust 1.75+
-- Solana CLI 1.18+
-- Anchor 0.30+
-
 # Build
 anchor build
 
 # Test
-anchor test
+cargo test --lib tests -- --nocapture
 ```
 
 ## License
